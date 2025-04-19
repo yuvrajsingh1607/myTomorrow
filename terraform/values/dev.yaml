@@ -1,0 +1,15 @@
+replicaCount: 2
+image:
+  repository: yuvrajone/mytomorrow
+  tag: v1.0.1
+  pullPolicy: IfNotPresent
+env:
+  LOG_LEVEL: DEBUG
+  MAX_CONNECTIONS: "5"
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+
