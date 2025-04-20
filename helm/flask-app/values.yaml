@@ -1,15 +1,2 @@
-# replicaCount: 2
-# image:
-#   repository: yuvrajone/mytomorrow
-#   tag: latest
-#   pullPolicy: IfNotPresent
-# service:
-#   type: NodePort
-#   port: 80
-# env:
-#   API_BASE_URL: https://api.example.com
-#   LOG_LEVEL: INFO
-#   MAX_CONNECTIONS: "10"
-# secrets:
-#   secret_key: your-secret-key
-#   db_password: your-db-password
+ports:
+  containerPort: 5000

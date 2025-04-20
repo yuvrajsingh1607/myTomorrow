@@ -31,7 +31,7 @@ spec:
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - containerPort: 5000
+            - containerPort: {{ .Values.ports.containerPort }}
           env:
             - name: SECRET_KEY
               valueFrom:
@@ -49,15 +49,22 @@ spec:
               value: {{ .Values.env.LOG_LEVEL }}
             - name: MAX_CONNECTIONS
               value: "{{ .Values.env.MAX_CONNECTIONS }}"
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 5000
+              port: {{ .Values.ports.containerPort }}
             initialDelaySeconds: 3
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /healthz
-              port: 5000
+              port: {{ .Values.ports.containerPort }}
             initialDelaySeconds: 3
             periodSeconds: 10
