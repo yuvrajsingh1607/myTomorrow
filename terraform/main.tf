@@ -17,7 +17,7 @@ locals {
 resource "helm_release" "flask_app" {
   name             = "${var.env}-flask-app"
   chart            = "../helm/flask-app"
-  namespace        = "mytomorrow"
+  namespace        = var.namespace
   create_namespace = true
 
   values = [
@@ -37,6 +37,11 @@ resource "helm_release" "flask_app" {
   set {
   name  = "env.API_BASE_URL"
   value = local.api_base_url
+  }
+
+set {
+  name  = "namespace"
+  value = var.namespace
   }
 
 }
