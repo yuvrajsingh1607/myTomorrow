@@ -15,6 +15,7 @@ spec:
         app: {{ .Release.Name }}
     spec:
       terminationGracePeriodSeconds: 30
+      # ensures that the application pods don't run on the same node.
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -50,6 +51,7 @@ spec:
               value: {{ .Values.env.LOG_LEVEL }}
             - name: MAX_CONNECTIONS
               value: "{{ .Values.env.MAX_CONNECTIONS }}"
+          #  Define CPU and memory requirements for the container.
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -57,6 +59,7 @@ spec:
             limits:
               cpu: {{ .Values.resources.limits.cpu }}
               memory: {{ .Values.resources.limits.memory }}
+          # Ensures the application is healthy and ready by checking the /healthz endpoint
           livenessProbe:
             httpGet:
               path: /healthz

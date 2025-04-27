@@ -1,3 +1,5 @@
+#Target CPU utilization to automatically scale pods based on workload demand, with configurable target CPU percentage
+
 {{- if .Values.autoscaling.enabled }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

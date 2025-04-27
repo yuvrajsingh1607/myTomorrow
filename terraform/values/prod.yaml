@@ -1,3 +1,4 @@
+# Variables defined for PROD env
 replicaCount: 3
 image:
   repository: yuvrajone/mytomorrow

@@ -1,3 +1,4 @@
+# Define PDB to ensure that a minimum number of pods remain available during node maintenance.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

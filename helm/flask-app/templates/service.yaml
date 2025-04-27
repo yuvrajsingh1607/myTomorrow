@@ -1,3 +1,4 @@
+#  listen on port 80 externally and forwards traffic to the container's port 5000.
 apiVersion: v1
 kind: Service
 metadata:

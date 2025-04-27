@@ -29,6 +29,7 @@ def config():
         "LOG_LEVEL": log_level,
         "MAX_CONNECTIONS": max_connections
     })
+# Define an endpoint /healthz in the application, which returns a HTTP response with the message "OK" and status code 200 indicating the application is healthy and running properly.
 @app.route('/healthz')
 def health():
     return "OK", 200

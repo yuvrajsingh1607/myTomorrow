@@ -1,3 +1,4 @@
+# Variables defined for DEV environment
 replicaCount: 2
 image:
   repository: yuvrajone/mytomorrow
