@@ -1,5 +1,5 @@
-# Flask App withTerraform, Helm and Kubernetes Deployment on Minikube nodes
-This project is a simple Flask application deployed using Helm on Kubernetes. It demonstrates how to containerize a Python app, manage configurations with environment variables, and deploy it on Kubernetes clusters using Helm charts.
+# Flask App deployment on Minikube nodes by utilizing Terraform, Helm and Kubernetes
+This project is a part of the assignment to deploy Flask application using Helm, terraform and Kubernetes. It demonstrates how to containerize a flask app, manage configurations with environment variables, and deploy it on Kubernetes clusters running on 2 node minikube nodes.
 ## 1. Installation
 
 Docker images are kept at:
