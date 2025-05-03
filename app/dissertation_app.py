@@ -258,7 +258,10 @@ def detect_anomalies():
         # Get anomaly predictions
         anomaly_scores = model.decision_function(features)
         threshold = np.percentile(anomaly_scores, 10)
-        is_anomaly = anomaly_scores < threshold
+        is_anomaly = (
+            (anomaly_scores < threshold) | 
+            (logs['ip_address'].apply(lambda x: x not in known_ips))
+        )
 
         results = []
         for i, row in logs.iterrows():
