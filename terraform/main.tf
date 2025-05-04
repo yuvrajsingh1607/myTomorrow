@@ -51,3 +51,9 @@ set {
 
 }
 
+resource "helm_release" "flask_login" {
+  name             = "${var.env}-flask-login"
+  chart            = "../helm/login"
+  namespace        = "flask-login"
+  create_namespace = true
+}

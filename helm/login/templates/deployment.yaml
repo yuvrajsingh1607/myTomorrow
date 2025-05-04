@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-login
+  labels:
+    app: flask-login
+spec:
+  replicas: 1  # Adjust the number of replicas based on your needs
+  selector:
+    matchLabels:
+      app: flask-login
+  template:
+    metadata:
+      labels:
+        app: flask-login
+    spec:
+      containers:
+      - name: flask-login
+        image: yuvrajone/loginapp:v1.0.1  # Replace with your Flask app's Docker image
+        ports:
+        - containerPort: 5000
+        env:
+        - name: FLASK_ENV
+          value: "production"  # You can set this to "development" if needed
+        - name: FLASK_APP
+          value: "app.py"  # The main entry point of your app, if named differently adjust here
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-login-service
+spec:
+  selector:
+    app: flask-login
+  ports:
+    - protocol: TCP
+      port: 80  # External port
+      targetPort: 5000  # Flask's internal port
+      nodePort: 30007  # The NodePort you want to expose the service on (can choose a different port)
+  type: NodePort  # Change this from ClusterIP to NodePort to expose externally

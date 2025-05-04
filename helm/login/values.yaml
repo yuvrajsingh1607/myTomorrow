@@ -1,0 +1,3 @@
+# common variables for all environments
+ports:
+  containerPort: 5000
