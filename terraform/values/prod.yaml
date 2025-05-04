@@ -1,18 +1,18 @@
 # Variables defined for PROD env
-replicaCount: 3
+replicaCount: 1
 image:
-  repository: yuvrajone/mytomorrow
-  tag: v1.0.3
+  repository: yuvrajone/project
+  tag: v1.0.24
   pullPolicy: IfNotPresent
 env:
   LOG_LEVEL: info
   MAX_CONNECTIONS: "9"
 autoscaling:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 5
+  minReplicas: 1
+  maxReplicas: 1
   targetCPUUtilizationPercentage: 70
-pdbMinAvailable: 2
+pdbMinAvailable: 1
 resources:
   requests:
     cpu: "100m"

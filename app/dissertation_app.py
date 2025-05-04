@@ -8,6 +8,7 @@ from datetime import datetime
 import numpy as np
 import socket
 import time
+from math import pi
 
 app = Flask(__name__)
 
@@ -18,8 +19,18 @@ KNOWN_IPS_FILE = '/data/known_ips.txt'
 
 # ----------------- Utility Functions -----------------
 
+def safe_parse_timestamp(timestamp_str):
+    try:
+        return pd.to_datetime(timestamp_str)
+    except:
+        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M', '%m/%d/%Y %H:%M:%S']:
+            try:
+                return datetime.strptime(timestamp_str, fmt)
+            except:
+                continue
+        raise ValueError(f"Could not parse timestamp: {timestamp_str}")
+
 def load_model_and_encoders():
-    """Load or initialize model and encoders"""
     try:
         model = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
         ip_encoder = joblib.load(IP_ENCODER_PATH) if os.path.exists(IP_ENCODER_PATH) else LabelEncoder()
@@ -30,7 +41,6 @@ def load_model_and_encoders():
         return None, LabelEncoder(), LabelEncoder()
 
 def save_model_and_encoders(model, ip_encoder, user_encoder):
-    """Save model and encoders to disk"""
     try:
         joblib.dump(model, MODEL_PATH)
         joblib.dump(ip_encoder, IP_ENCODER_PATH)
@@ -40,7 +50,6 @@ def save_model_and_encoders(model, ip_encoder, user_encoder):
         raise
 
 def load_known_ips():
-    """Load known IP addresses from file"""
     try:
         if os.path.exists(KNOWN_IPS_FILE):
             with open(KNOWN_IPS_FILE, 'r') as f:
@@ -51,7 +60,6 @@ def load_known_ips():
         return set()
 
 def save_known_ips(ips):
-    """Save known IP addresses to file"""
     try:
         with open(KNOWN_IPS_FILE, 'w') as f:
             for ip in sorted(ips):
@@ -61,92 +69,72 @@ def save_known_ips(ips):
         raise
 
 def preprocess_logs(logs, ip_encoder, user_encoder, fit_encoders=False):
-    """Preprocess log data for model training/detection"""
-    # Convert timestamp to numerical features
-    logs['timestamp'] = pd.to_datetime(logs['timestamp'])
+    try:
+        logs['timestamp'] = logs['timestamp'].apply(safe_parse_timestamp)
+    except Exception as e:
+        raise ValueError(f"Timestamp parsing failed: {str(e)}")
+
     logs['hour'] = logs['timestamp'].dt.hour
     logs['minute'] = logs['timestamp'].dt.minute
     logs['day_of_week'] = logs['timestamp'].dt.dayofweek
-    
-    # Encode result
-    logs['result'] = logs['result'].apply(lambda x: 1 if str(x).lower() == 'success' else 0)
-    
-    # Handle new IPs and users during inference
+
+    logs['hour_sin'] = np.sin(2*pi*logs['hour']/24)
+    logs['hour_cos'] = np.cos(2*pi*logs['hour']/24)
+    logs['is_night'] = logs['hour'].apply(lambda x: 1 if x < 6 or x > 22 else 0)
+
+    logs['result'] = logs['result'].apply(lambda x: 1 if str(x).lower() in ['success', '1', 'true'] else 0)
+
     if fit_encoders:
         ip_encoder.fit(logs['ip_address'])
         user_encoder.fit(logs['user_id'])
-    
-    # Transform IPs and users
+
     try:
         logs['ip_encoded'] = ip_encoder.transform(logs['ip_address'])
     except ValueError:
         if fit_encoders:
             raise
-        # During inference, assign a special value for unseen IPs
         logs['ip_encoded'] = len(ip_encoder.classes_)
-    
+
     try:
         logs['user_encoded'] = user_encoder.transform(logs['user_id'])
     except ValueError:
         if fit_encoders:
             raise
-        # During inference, assign a special value for unseen users
         logs['user_encoded'] = len(user_encoder.classes_)
-    
-    return logs[['ip_encoded', 'user_encoded', 'result', 'hour', 'minute', 'day_of_week']]
+
+    return logs[['ip_encoded', 'user_encoded', 'result', 'hour_sin', 'hour_cos', 'is_night', 'day_of_week']]
 
 def train_model(features):
-    """Train isolation forest model"""
-    model = IsolationForest(
-        n_estimators=200,
-        contamination=0.1,
-        max_features=1.0,
-        bootstrap=False,
-        random_state=42,
-        verbose=1,
-        n_jobs=-1
-    )
+    model = IsolationForest(n_estimators=500, contamination=0.2, max_features=0.7,
+                            random_state=42, verbose=1, n_jobs=-1)
     model.fit(features)
     return model
 
 def generate_synthetic_anomalies(features, ip_encoder, user_encoder):
-    """Generate synthetic anomalous data points"""
-    synthetic = []
-    
-    # Generate some IPs not seen in training
+    synthetic_raw = []
     fake_ips = [f"10.0.0.{i}" for i in range(1, 6)]
     for ip in fake_ips:
         if ip not in ip_encoder.classes_:
             ip_encoder.classes_ = np.append(ip_encoder.classes_, ip)
-    
-    # Generate some user IDs not seen in training
     fake_users = [f"attacker_{i}" for i in range(1, 4)]
     for user in fake_users:
         if user not in user_encoder.classes_:
             user_encoder.classes_ = np.append(user_encoder.classes_, user)
-    
-    # Create synthetic anomalies
     num_anomalies = max(5, len(features) // 20)
-    
     for _ in range(num_anomalies):
-        anomaly = {
-            'ip_encoded': np.random.choice([ip_encoder.transform(fake_ips)[0], 
-                                         np.random.randint(0, len(ip_encoder.classes_))]),
-            'user_encoded': np.random.choice([user_encoder.transform(fake_users)[0],
-                                           np.random.randint(0, len(user_encoder.classes_))]),
-            'result': 0,
-            'hour': np.random.randint(0, 24),
-            'minute': np.random.randint(0, 60),
-            'day_of_week': np.random.randint(0, 7)
-        }
-        synthetic.append(anomaly)
-    
-    return pd.DataFrame(synthetic)
+        timestamp = datetime.utcnow().replace(hour=np.random.randint(0, 24), minute=np.random.randint(0, 60))
+        synthetic_raw.append({
+            'timestamp': timestamp.isoformat(),
+            'user_id': np.random.choice(fake_users),
+            'ip_address': np.random.choice(fake_ips),
+            'result': 'failure'
+        })
+    df_raw = pd.DataFrame(synthetic_raw)
+    return preprocess_logs(df_raw, ip_encoder, user_encoder, fit_encoders=False)
 
 def get_anomaly_reason(row, score, threshold, ip_encoder, user_encoder):
-    """Determine reasons for anomaly"""
     reasons = []
-    if row['hour'] < 6 or row['hour'] > 20:
+    if row['hour_sin'] < -0.95 or row['hour_cos'] < -0.95:
         reasons.append("unusual_time")
     if row['result'] == 0:
         reasons.append("login_failure")
@@ -158,88 +146,61 @@ def get_anomaly_reason(row, score, threshold, ip_encoder, user_encoder):
         reasons.append("unknown_user")
     return reasons if reasons else "unknown_reason"
 
-# ----------------- Flask Endpoints -----------------
-
 @app.route('/healthz')
 def health():
-    """Simplified health check endpoint"""
     try:
-        return jsonify({
-            "status": "OK",
-            "timestamp": datetime.utcnow().isoformat()
-        }), 200
+        return jsonify({"status": "OK", "timestamp": datetime.utcnow().isoformat()}), 200
     except Exception as e:
-        return jsonify({
-            "status": "ERROR",
-            "error": str(e)
-        }), 500
+        return jsonify({"status": "ERROR", "error": str(e)}), 500
 
 @app.route('/train', methods=['POST'])
 def train():
-    """Train the anomaly detection model"""
     try:
         data = request.json
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-            
         logs = pd.DataFrame(data)
-        
-        # Validate required columns
         required_columns = ['timestamp', 'user_id', 'ip_address', 'result']
         if not all(col in logs.columns for col in required_columns):
-            return jsonify({"error": f"Missing required columns. Needed: {required_columns}"}), 400
+            return jsonify({"error": f"Missing required columns: {required_columns}"}), 400
 
-        # Check failure count
-        failure_count = len(logs[logs['result'].str.lower() == 'failure'])
-        if failure_count == 0:
-            app.logger.warning("Training data contains only successful attempts")
-
-        # Load known IPs and encoders
         known_ips = load_known_ips()
-        _, ip_encoder, user_encoder = load_model_and_encoders()
+        model, ip_encoder, user_encoder = load_model_and_encoders()
 
-        # Update known IPs
         new_ips = set(logs['ip_address'].astype(str).unique())
         known_ips.update(new_ips)
         save_known_ips(known_ips)
 
-        # Preprocess and train
         features = preprocess_logs(logs, ip_encoder, user_encoder, fit_encoders=True)
-        
-        if failure_count == 0:
-            app.logger.info("Generating synthetic anomalies")
-            synthetic_features = generate_synthetic_anomalies(features, ip_encoder, user_encoder)
-            features = pd.concat([features, synthetic_features])
+
+        failure_count = len(logs[logs['result'] == 0])
+        if failure_count < 3:
+            synthetic = generate_synthetic_anomalies(features, ip_encoder, user_encoder)
+            features = pd.concat([features, synthetic])
 
         model = train_model(features)
         save_model_and_encoders(model, ip_encoder, user_encoder)
 
         return jsonify({
-            "message": "Model trained successfully!",
+            "message": "Model trained successfully",
             "stats": {
-                "num_samples": len(logs),
-                "num_features": features.shape[1],
-                "num_ips": len(known_ips),
-                "num_users": len(user_encoder.classes_),
-                "failure_count": failure_count,
-                "synthetic_anomalies_added": len(features) - len(logs) if failure_count == 0 else 0
+                "samples": len(logs),
+                "features": features.shape[1],
+                "ips": len(known_ips),
+                "users": len(user_encoder.classes_),
+                "failures": failure_count,
+                "synthetic_added": len(features) - len(logs) if failure_count < 3 else 0
             }
         })
     except Exception as e:
-        app.logger.error(f"Training error: {str(e)}")
         return jsonify({"error": f"Training failed: {str(e)}"}), 500
 
 @app.route('/detect', methods=['POST'])
 def detect_anomalies():
-    """Detect anomalies in log data"""
     try:
         data = request.json
         if not data:
             return jsonify({"error": "No data provided"}), 400
-            
+
         logs = pd.DataFrame(data)
-        
-        # Validate required columns
         required_columns = ['timestamp', 'user_id', 'ip_address', 'result']
         if not all(col in logs.columns for col in required_columns):
             return jsonify({"error": f"Missing required columns. Needed: {required_columns}"}), 400
@@ -249,30 +210,31 @@ def detect_anomalies():
             return jsonify({"error": "Model not trained yet!"}), 400
 
         known_ips = load_known_ips()
-
         try:
             features = preprocess_logs(logs, ip_encoder, user_encoder, fit_encoders=False)
         except ValueError as e:
             return jsonify({"error": f"Preprocessing error: {str(e)}"}), 400
 
-        # Get anomaly predictions
         anomaly_scores = model.decision_function(features)
-        threshold = np.percentile(anomaly_scores, 10)
-        is_anomaly = (
-            (anomaly_scores < threshold) | 
-            (logs['ip_address'].apply(lambda x: x not in known_ips))
-        )
+        threshold = np.percentile(anomaly_scores, 5)
+        is_anomaly = anomaly_scores < threshold
+
+        for i, row in logs.iterrows():
+            ip_unknown = row['ip_address'] not in known_ips
+            is_night = features.iloc[i]['is_night'] == 1
+            if ip_unknown or is_night:
+                is_anomaly[i] = True
 
         results = []
         for i, row in logs.iterrows():
             result = {
                 "timestamp": str(row["timestamp"]),
-                "user_id": str(row["user_id"]),
-                "ip_address": str(row["ip_address"]),
+                "user_id": row["user_id"],
+                "ip_address": row["ip_address"],
                 "result": "success" if row["result"] == 1 else "failure",
                 "is_anomaly": bool(is_anomaly[i]),
                 "anomaly_score": float(anomaly_scores[i]),
-                "unknown_ip": bool(row["ip_address"] not in known_ips),
+                "unknown_ip": row["ip_address"] not in known_ips,
                 "reason": get_anomaly_reason(features.iloc[i], anomaly_scores[i], threshold, ip_encoder, user_encoder) if is_anomaly[i] else None
             }
             results.append(result)
@@ -280,27 +242,21 @@ def detect_anomalies():
         return jsonify({
             "results": results,
             "stats": {
-                "total_logs": int(len(logs)),
+                "total_logs": len(logs),
                 "anomalies_detected": int(sum(is_anomaly)),
-                "unknown_ips": int(sum(row["ip_address"] not in known_ips for _, row in logs.iterrows())),
+                "unknown_ips": sum(row["ip_address"] not in known_ips for _, row in logs.iterrows()),
                 "anomaly_threshold": float(threshold)
             }
         })
-    except Exception as e:
-        app.logger.error(f"Detection error: {str(e)}")
-        return jsonify({"error": f"Detection failed: {str(e)}"}), 500
 
-# ----------------- Entry Point -----------------
+    except Exception as e:
+        return jsonify({"error": f"Detection failed: {str(e)}"}), 500
 
 if __name__ == '__main__':
     print("Starting Flask application...")
     print(f"Host: 0.0.0.0, Port: 5000")
-    
-    # Ensure data directory exists
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     print(f"Data directory ready: {os.path.dirname(MODEL_PATH)}")
-    
-    # Start the application
     try:
         app.run(host='0.0.0.0', port=5000, threaded=True)
     except Exception as e:
