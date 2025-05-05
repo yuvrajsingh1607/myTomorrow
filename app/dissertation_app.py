@@ -10,7 +10,17 @@ import socket
 import time
 from math import pi
 
+from prometheus_flask_exporter import PrometheusMetrics
+from prometheus_client import Counter, Gauge
+
 app = Flask(__name__)
+metrics = PrometheusMetrics(app)
+# this app is used to find anomaly in logs.
+# Custom Prometheus metrics
+anomaly_requests_total = Counter('anomaly_requests_total', 'Total /detect requests received')
+anomalies_detected_total = Counter('anomalies_detected_total', 'Total anomalies detected')
+anomaly_score_threshold = Gauge('anomaly_score_threshold', 'Current anomaly score threshold')
+last_anomaly_score = Gauge('last_anomaly_score', 'Anomaly score of the last record')
 
 MODEL_PATH = '/data/anomaly_detection_model.pkl'
 IP_ENCODER_PATH = '/data/ip_encoder.pkl'
@@ -88,19 +98,8 @@ def preprocess_logs(logs, ip_encoder, user_encoder, fit_encoders=False):
         ip_encoder.fit(logs['ip_address'])
         user_encoder.fit(logs['user_id'])
 
-    try:
-        logs['ip_encoded'] = ip_encoder.transform(logs['ip_address'])
-    except ValueError:
-        if fit_encoders:
-            raise
-        logs['ip_encoded'] = len(ip_encoder.classes_)
-
-    try:
-        logs['user_encoded'] = user_encoder.transform(logs['user_id'])
-    except ValueError:
-        if fit_encoders:
-            raise
-        logs['user_encoded'] = len(user_encoder.classes_)
+    logs['ip_encoded'] = logs['ip_address'].apply(lambda ip: ip_encoder.transform([ip])[0] if ip in ip_encoder.classes_ else -1)
+    logs['user_encoded'] = logs['user_id'].apply(lambda user: user_encoder.transform([user])[0] if user in user_encoder.classes_ else -1)
 
     return logs[['ip_encoded', 'user_encoded', 'result', 'hour_sin', 'hour_cos', 'is_night', 'day_of_week']]
 
@@ -140,9 +139,9 @@ def get_anomaly_reason(row, score, threshold, ip_encoder, user_encoder):
         reasons.append("login_failure")
     if score < threshold - 0.2:
         reasons.append("high_anomaly_score")
-    if 'ip_encoded' in row and row['ip_encoded'] >= len(ip_encoder.classes_):
+    if row['ip_encoded'] == -1:
         reasons.append("unknown_ip")
-    if 'user_encoded' in row and row['user_encoded'] >= len(user_encoder.classes_):
+    if row['user_encoded'] == -1:
         reasons.append("unknown_user")
     return reasons if reasons else "unknown_reason"
 
@@ -200,6 +199,8 @@ def detect_anomalies():
         if not data:
             return jsonify({"error": "No data provided"}), 400
 
+        anomaly_requests_total.inc()
+
         logs = pd.DataFrame(data)
         required_columns = ['timestamp', 'user_id', 'ip_address', 'result']
         if not all(col in logs.columns for col in required_columns):
@@ -219,11 +220,17 @@ def detect_anomalies():
         threshold = np.percentile(anomaly_scores, 5)
         is_anomaly = anomaly_scores < threshold
 
+        anomaly_score_threshold.set(threshold)
+
         for i, row in logs.iterrows():
             ip_unknown = row['ip_address'] not in known_ips
             is_night = features.iloc[i]['is_night'] == 1
             if ip_unknown or is_night:
                 is_anomaly[i] = True
+
+        anomalies_detected_total.inc(int(sum(is_anomaly)))
+        if len(anomaly_scores) > 0:
+            last_anomaly_score.set(float(anomaly_scores[-1]))
 
         results = []
         for i, row in logs.iterrows():

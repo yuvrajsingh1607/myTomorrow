@@ -1,0 +1,15 @@
+# flask-login-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: prod-flask-monitor  
+  namespace: mytomorrow
+  labels:
+    app: prod-flask-app
+spec:
+  selector:
+    app: prod-flask-app  # this should match your pod label
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000

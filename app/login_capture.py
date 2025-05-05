@@ -1,50 +1,77 @@
-import json
 import logging
+import requests
+from loguru import logger
+from flask import Flask, jsonify, request
+import time
 from datetime import datetime
-from flask import Flask, request, jsonify
+import json
+import sys
+from werkzeug.serving import WSGIRequestHandler
 
 app = Flask(__name__)
 
-# Disable Flask's default HTTP access logs
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)  # Set to ERROR or higher to suppress lower level logs
+# this app is used to print logs on console like success of failure
+# Disable all Flask/Werkzeug logging
+logging.getLogger('werkzeug').disabled = True
+app.logger.disabled = True
 
-# Configure custom logging for authentication logs
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger()
+# Configure Werkzeug to not log requests
+WSGIRequestHandler.log_request = lambda *args, **kwargs: None
 
-# Mock users database for authentication
-users_db = {
-    "user_1": "password1",
-    "user_2": "password2",
-    "user_3": "password3"
-}
+# Loki configuration
+LOKI_URL = "http://loki.default.svc.cluster.local:3100/loki/api/v1/push"
 
-# Function to log authentication attempts
-def log_authentication(user_id, ip_address, result):
-    log_entry = {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "user_id": user_id,
-        "ip_address": ip_address,
-        "result": result
-    }
-    logger.info(json.dumps(log_entry))  # Log the entry as a JSON string
+class LokiHandler:
+    def write(self, message):
+        try:
+            # Only process properly formatted JSON messages
+            if message.strip().startswith('{'):
+                payload = {
+                    "streams": [
+                        {
+                            "stream": {
+                                "job": "flask-app",
+                                "namespace": "flask-login"
+                            },
+                            "values": [
+                                [str(int(time.time() * 1e9)), message.strip()]
+                            ]
+                        }
+                    ]
+                }
+                headers = {"Content-Type": "application/json"}
+                requests.post(LOKI_URL, json=payload, headers=headers, timeout=5)
+        except Exception:
+            pass  # Silently fail if Loki is unavailable
 
-# Login endpoint
+# Configure logging - only our JSON messages
+logger.remove()
+logger.add(sys.stdout, format="{message}", level="INFO")
+logger.add(LokiHandler(), format="{message}", level="INFO")
+
 @app.route('/login', methods=['POST'])
 def login():
-    data = request.json
-    username = data.get("username")
+    data = request.get_json()
+    user_id = data.get("username")
     password = data.get("password")
-    ip_address = request.remote_addr  # Get the IP address of the client
+    ip_address = request.remote_addr
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    log_data = {
+        "timestamp": timestamp,
+        "user_id": user_id,
+        "ip_address": ip_address,
+        "result": "success" if user_id == "user_1" and password == "password1" else "failure"
+    }
+
+    # Log only the JSON message
+    logger.info(json.dumps(log_data, separators=(',', ':')))
     
-    if username in users_db and users_db[username] == password:
-        log_authentication(username, ip_address, "success")
+    if log_data["result"] == "success":
         return jsonify({"message": "Login successful"}), 200
     else:
-        log_authentication(username, ip_address, "failure")
-        return jsonify({"message": "Invalid credentials"}), 401
+        return jsonify({"message": "Login failed"}), 401
 
-# Start the Flask app
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Run without any access logging
+    app.run(debug=False, host='0.0.0.0', port=5000)

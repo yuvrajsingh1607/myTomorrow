@@ -1,0 +1,19 @@
+# flask-login-servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: prod-flask-monitor
+  namespace: default
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: prod-flask-app
+  namespaceSelector:
+    matchNames:
+      - mytomorrow
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
